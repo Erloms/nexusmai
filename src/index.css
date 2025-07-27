@@ -1,0 +1,89 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 230 25% 10%;
+    --foreground: 210 40% 98%;
+
+    --card: 230 25% 15%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 230 25% 12%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 192 80% 50%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 250 70% 30%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 230 25% 20%;
+    --muted-foreground: 210 20% 80%;
+
+    --accent: 330 80% 50%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 230 25% 25%;
+    --input: 230 25% 25%;
+    --ring: 192 80% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 230 25% 8%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 192 80% 50%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 230 25% 20%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 230 25% 25%;
+    --sidebar-ring: 192 80% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground overflow-x-hidden;
+    background-image: radial-gradient(circle at 50% 50%, rgba(30, 174, 219, 0.1) 0%, transparent 70%),
+                     linear-gradient(to bottom, rgba(54, 36, 98, 0.2) 0%, transparent 100%);
+    background-size: 100% 100%, 100% 100%;
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-nexus-blue to-nexus-cyan;
+  }
+  
+  .text-gradient-reverse {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-nexus-cyan to-nexus-blue;
+  }
+
+  .text-gradient-gold {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 to-nexus-gold;
+  }
+
+  .card-glowing {
+    @apply relative overflow-hidden rounded-xl;
+  }
+
+  .card-glowing::before {
+    @apply content-[''] absolute inset-0 bg-gradient-to-r from-nexus-blue via-nexus-cyan to-nexus-accent opacity-50 blur-xl rounded-xl;
+    z-index: -2;
+  }
+
+  .card-glowing::after {
+    @apply content-[''] absolute inset-[2px] bg-nexus-dark rounded-xl;
+    z-index: -1;
+  }
+}
