@@ -3,29 +3,37 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import md5 from 'https://esm.sh/md5';
 
-// 定义CORS头，允许前端调用
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-};
+// ★★★ 1. 定义我们的“白名单” ★★★
+const allowedOrigins = [
+  'http://localhost:32100', // 允许本地开发
+  'https://nexus.m7ai.top'  // 允许线上域名
+];
 
 // 你的“余宽云码支付”配置信息
 const MAPAY_PID = "170343392";
 const MAPAY_KEY = "P2Z1q3PDtQptzkt38qp8ZZQ0XS1N1bNq";
-const MAPAY_API_URL = "https://zf.yk520.top/mapi.php"; // 【注意】使用 mapi.php
+const MAPAY_API_URL = "https://zf.yk520.top/mapi.php";
 
 serve(async (req) => {
+  // ★★★ 2. 动态生成CORS头 ★★★
+  const origin = req.headers.get("Origin") || "";
+  const corsHeaders = {
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    // 检查请求来源是否在我们的白名单里
+    'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : allowedOrigins[1] // 默认允许线上域名
+  };
+
   // 处理浏览器的OPTIONS预检请求
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { productId } = await req.json(); // 前端只需要传一个商品ID
+    const { productId } = await req.json();
 
-    // 根据商品ID确定价格和名称 (你可以自己扩展)
-    let money = '0.01'; // 默认测试价格
+    // 根据商品ID确定价格和名称
+    let money = '0.01';
     let name = '测试商品';
     if (productId === '永久会员') {
         money = '399.00';
@@ -35,15 +43,12 @@ serve(async (req) => {
         name = '年费会员';
     }
 
-    // ★★★ 这里是你唯一需要修改的地方！★★★
-    const notify_url = `https://gwueqkusxarhomnabcrg.supabase.co/functions/v1/mapay-notify`; // 异步通知地址
-    const return_url = `https://nexus.m7ai.top/payment-success`; // 支付成功后跳转地址
-    // ★★★ 请再次确认上面的 Supabase 项目ID 和你的网站域名是否正确！★★★
+    const notify_url = `https://gwueqkusxarhomnabcrg.supabase.co/functions/v1/mapay-notify`;
+    const return_url = `https://nexus.m7ai.top/payment-success`;
 
     const out_trade_no = `order_${Date.now()}`;
     const type = 'alipay';
     
-    // 准备用于签名的参数 (根据码支付文档)
     const signParams = {
       money: money,
       name: name,
@@ -54,13 +59,11 @@ serve(async (req) => {
       type: type,
     };
     
-    // 构建签名字符串 (按首字母排序后拼接)
     const sortedKeys = Object.keys(signParams).sort();
     let signString = sortedKeys.map(key => `${key}=${signParams[key as keyof typeof signParams]}`).join('&');
     signString += MAPAY_KEY;
     const sign = md5(signString);
     
-    // 构建最终请求码支付的URL
     const paymentParams = new URLSearchParams({
       ...signParams,
       sign: sign,
@@ -69,7 +72,6 @@ serve(async (req) => {
     
     const paymentUrl = `${MAPAY_API_URL}?${paymentParams.toString()}`;
 
-    // 直接返回支付URL给前端
     return new Response(
       JSON.stringify({ paymentUrl: paymentUrl }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
