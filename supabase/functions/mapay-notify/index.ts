@@ -1,109 +1,92 @@
-// supabase/functions/mapay-notify/index.ts
+// supabase/functions/create-mapay-order/index.ts
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import md5 from "https://esm.sh/md5";
+import md5 from 'https://esm.sh/md5';
 
-// ★★★ 新增的部分 ★★★
-// 虽然回调通常是服务器到服务器，但加上CORS头是一个好习惯
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // 回调通常不涉及浏览器跨域，用 '*' 即可
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type',
-};
-// ★★★ 新增结束 ★★★
+// CORS配置，允许你的线上网站和本地环境访问
+const allowedOrigins = [
+  'http://localhost:32100',
+  'https://nexus.m7ai.top'
+];
 
-// 你的码支付密钥，用于验签
+// 你的“余宽云码支付”配置信息
+const MAPAY_PID = "170343392";
 const MAPAY_KEY = "P2Z1q3PDtQptzkt38qp8ZZQ0XS1N1bNq";
+const MAPAY_API_URL = "https://zf.yk520.top/mapi.php";
 
 serve(async (req) => {
-  // ★★★ 新增的部分 ★★★
-  // 即使是回调，也最好处理一下OPTIONS预检请求
+  // 动态处理CORS
+  const origin = req.headers.get("Origin") || "";
+  const corsHeaders = {
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : allowedOrigins[1]
+  };
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
-  // ★★★ 新增结束 ★★★
 
   try {
-    // 码支付的回调通知是通过URL参数 (GET请求) 发送的
-    const url = new URL(req.url);
-    const params = url.searchParams;
+    const { productId } = await req.json(); // 前端只需要传一个商品ID
 
-    console.log("收到码支付回调:", req.url);
-
-    // ... (你下面所有的代码都完全正确，一行都不用改！)
-    // ... (从这里开始，到最后的所有代码，都保持原样)
-    const pid = params.get('pid');
-    const trade_no = params.get('trade_no');
-    const out_trade_no = params.get('out_trade_no');
-    const type = params.get('type');
-    const name = params.get('name');
-    const money = params.get('money');
-    const trade_status = params.get('trade_status');
-    const sign = params.get('sign');
-    
-    const signString = `money=${money}&name=${name}&out_trade_no=${out_trade_no}&pid=${pid}&trade_no=${trade_no}&trade_status=${trade_status}&type=${type}${MAPAY_KEY}`;
-    const calculatedSign = md5(signString);
-
-    if (sign !== calculatedSign) {
-      console.error("签名验证失败!");
-      return new Response("fail: sign error", { status: 400, headers: corsHeaders });
+    // 根据前端传来的productId，写死价格和名称
+    let money = '';
+    let name = '';
+    if (productId === 'annual') { // 对应你前端的 'annual'
+        money = '99.00';
+        name = '年费会员';
+    } else if (productId === 'lifetime') { // 对应你前端的 'lifetime'
+        money = '399.00';
+        name = '永久会员';
+    } else if (productId === 'agent') { // 对应你前端的 'agent'
+        money = '1999.00';
+        name = '代理商';
+    } else {
+        // 如果传来一个未知的ID，就报错
+        throw new Error(`未知的商品ID: ${productId}`);
     }
-    console.log("签名验证成功!");
 
-    if (trade_status === 'TRADE_SUCCESS') {
-      const supabaseAdmin = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-      );
+    // ★★★ 确保这里的回调函数名，和你文件夹里的名字一致！★★★
+    const notify_url = `https://gwueqkusxarhomnabcrg.supabase.co/functions/v1/alipay-notify`;
+    const return_url = `https://nexus.m7ai.top/payment-success`;
 
-      const { data: order, error: findError } = await supabaseAdmin
-        .from('orders')
-        .select('*')
-        .eq('order_number', out_trade_no)
-        .single();
-
-      if (findError || !order) {
-        console.error("订单未找到:", out_trade_no, findError);
-        return new Response("fail: order not found", { status: 404, headers: corsHeaders });
-      }
-
-      if (order.status !== 'paid') {
-        console.log(`开始处理订单 ${out_trade_no}, 当前状态: ${order.status}`);
-        
-        const { error: updateError } = await supabaseAdmin
-          .from('orders')
-          .update({ status: 'paid', payment_id: trade_no, updated_at: new Date().toISOString() })
-          .eq('id', order.id);
-
-        if (updateError) {
-          throw new Error(`更新订单状态失败: ${updateError.message}`);
-        }
-        console.log("订单状态更新为 'paid' 成功!");
-
-        if (order.product_id) {
-          const { error: rpcError } = await supabaseAdmin.rpc('activate_membership', {
-            p_user_id: order.user_id,
-            p_plan_id: order.product_id,
-            p_order_id: order.id
-          });
-
-          if (rpcError) {
-            console.error(`激活会员失败 (RPC 'activate_membership'):`, rpcError);
-          } else {
-            console.log(`用户 ${order.user_id} 的会员权限 ${order.product_id} 已成功激活!`);
-          }
-        }
-      } else {
-        console.log(`订单 ${out_trade_no} 已处理过，无需重复操作。`);
-      }
-    }
+    const out_trade_no = `order_${Date.now()}`;
+    const type = 'alipay';
     
-    // 在返回的响应中也加上CORS头
-    return new Response("success", { headers: corsHeaders });
+    const signParams = {
+      money: money,
+      name: name,
+      notify_url: notify_url,
+      out_trade_no: out_trade_no,
+      pid: MAPAY_PID,
+      return_url: return_url,
+      type: type,
+    };
+    
+    const sortedKeys = Object.keys(signParams).sort();
+    let signString = sortedKeys.map(key => `${key}=${signParams[key as keyof typeof signParams]}`).join('&');
+    signString += MAPAY_KEY;
+    const sign = md5(signString);
+    
+    const paymentParams = new URLSearchParams({
+      ...signParams,
+      sign: sign,
+      sign_type: 'MD5',
+    });
+    
+    const paymentUrl = `${MAPAY_API_URL}?${paymentParams.toString()}`;
+
+    // 直接返回拼接好的支付URL给前端
+    return new Response(
+      JSON.stringify({ paymentUrl: paymentUrl }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
 
   } catch (error) {
-    console.error("处理码支付回调时发生严重错误:", error);
-    return new Response("fail: internal server error", { status: 500, headers: corsHeaders });
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 });
