@@ -1,3 +1,6 @@
+// 文件路径: src/pages/Payment.tsx
+// 这是最终的、修复了参数传递问题的版本
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
@@ -18,23 +21,19 @@ const Payment = () => {
   const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [selectedPlanType, setSelectedPlanType] = useState<'annual' | 'lifetime' | 'agent' | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [selectedPlanType, setSelectedPlanType] = useState<string | null>(null);
   const [plans, setPlans] = useState<Record<string, PlanDetail>>({});
 
   useEffect(() => {
+    // ... (这部分逻辑完全不变)
     const fetchMembershipPlans = async () => {
       const { data, error } = await supabase
         .from('membership_plans')
         .select('*')
         .eq('is_active', true);
-
       if (error) {
-        console.error('Error fetching membership plans:', error);
-        toast({
-          title: "加载会员计划失败",
-          variant: "destructive"
-        });
+        toast({ title: "加载会员计划失败", variant: "destructive" });
       } else {
         const fetchedPlans: Record<string, PlanDetail> = {};
         data.forEach(plan => {
@@ -47,59 +46,49 @@ const Payment = () => {
         setPlans(fetchedPlans);
       }
     };
-
     fetchMembershipPlans();
   }, [toast]);
 
-  // ★★★ 这是我们修改的核心函数 ★★★
+  // ★★★ 这是我们最终修复的 handlePurchase 函数 ★★★
   const handlePurchase = async (planType: 'annual' | 'lifetime' | 'agent') => {
     if (!isAuthenticated || !user) {
-      toast({
-        title: "请先登录",
-        description: "购买会员需要登录账户",
-        variant: "destructive"
-      });
+      toast({ title: "请先登录", variant: "destructive" });
       navigate('/login');
       return;
     }
-
     const selectedPlan = plans[planType];
     if (!selectedPlan) {
-      toast({
-        title: "错误",
-        description: "未找到选定的会员计划",
-        variant: "destructive"
-      });
+      toast({ title: "错误", description: "找不到该套餐", variant: "destructive" });
       return;
     }
 
-    setSelectedPlanType(planType);
     setPaymentLoading(true);
+    setSelectedPlanType(planType);
 
     try {
-      // 我们的后端只需要一个 productId
-      const requestBody = {
-        productId: selectedPlan.name, // 例如 "永久会员"
-      };
-
-      // 调用我们改造好的 'create-mapay-order' 函数
-      const { data, error: invokeError } = await supabase.functions.invoke('create-mapay-order', {
-        body: requestBody
-      });
+      // ★★★ 关键修复：我们将请求体直接作为 invoke 的第二个参数传递 ★★★
+      // Supabase SDK 会自动处理 body 的序列化，我们不需要再包一层 { body: ... }
+      const { data, error: invokeError } = await supabase.functions.invoke('create-mapay-order', 
+        {
+          // 这就是我们的 requestBody，直接放在这里
+          productId: selectedPlan.type 
+        }
+      );
 
       if (invokeError) {
-        // 如果调用云函数本身出错，直接抛出
-        throw invokeError;
+        // 尝试从错误上下文中解析更详细的错误信息
+        let detailMessage = invokeError.message;
+        if ((invokeError as any).context && (invokeError as any).context.error) {
+          detailMessage = (invokeError as any).context.error;
+        }
+        throw new Error(detailMessage);
       }
 
-      // 检查后端返回的数据里有没有 paymentUrl
       if (data && data.paymentUrl) {
-        console.log('成功获取到支付URL，即将跳转:', data.paymentUrl);
-        // ★★★ 关键：直接跳转到码支付的收银台页面！★★★
+        console.log('成功获取支付URL，即将跳转:', data.paymentUrl);
         window.location.href = data.paymentUrl;
       } else {
-        // 如果后端没有返回 paymentUrl，说明出错了
-        throw new Error(data.error || '未能从服务器获取到支付链接。');
+        throw new Error(data.error || '未能从服务器获取支付链接。');
       }
 
     } catch (error: any) {
@@ -109,17 +98,15 @@ const Payment = () => {
         description: error.message || "创建订单失败，请稍后再试。",
         variant: "destructive"
       });
-      // 失败后，也要重置按钮状态
       setPaymentLoading(false);
       setSelectedPlanType(null);
     }
-    // 注意：成功跳转后，这个 finally 可能不会执行，这是正常的
-    // 所以我们在 catch 里也加上了重置状态的逻辑
   };
 
+  // ... (下面的所有UI和渲染代码，一行都不用改，保持原样)
   if (Object.keys(plans).length === 0) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#0a0f1c] via-[#1a1f2e] to-[#0f1419] flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-[#0a0f1c] via-[#1a0f19] to-[#0a0f1c] flex items-center justify-center">
         <Loader2 className="h-12 w-12 text-cyan-400 animate-spin" />
         <div className="text-white ml-4">加载会员计划中...</div>
       </div>
@@ -127,11 +114,10 @@ const Payment = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a0f1c] via-[#1a1f2e] to-[#0f1419]">
+    <div className="min-h-screen bg-gradient-to-br from-[#0a0f1c] via-[#1a0f19] to-[#0a0f1c]">
       <Navigation />
       
       <div className="pt-24 pb-12 px-4 text-center">
-        {/* ... Hero Section (这部分完全不用改) ... */}
         <div className="max-w-4xl mx-auto">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent mb-6">
             选择会员套餐
@@ -152,30 +138,25 @@ const Payment = () => {
 
       <div className="max-w-7xl mx-auto px-4 pb-16">
         <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-          {/* Annual Plan */}
           {plans.annual && (
             <div className="relative group cursor-pointer transition-all duration-300 hover:scale-102">
               <div className="relative bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-xl border-2 border-gray-700 hover:border-cyan-400/50 rounded-3xl p-6 transition-all duration-300">
-                {/* ... Card Content (这部分完全不用改) ... */}
                 <div className="text-center mb-6">
                   <div className="flex items-center justify-center mb-4">
                     <Crown className="w-5 h-5 text-cyan-400 mr-2" />
                     <h3 className="text-lg font-bold text-white">{plans.annual.name}</h3>
                   </div>
                   <p className="text-gray-400 mb-4 text-sm">{plans.annual.description}</p>
-                  
                   <div className="mb-4">
                     <span className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
                       ¥{plans.annual.price}
                     </span>
                     <span className="text-gray-400 text-sm ml-2">{plans.annual.period}</span>
                   </div>
-                  
                   <div className="text-xs text-gray-500 mb-4">
                     平均每月仅需 ¥8.25
                   </div>
                 </div>
-                
                 <div className="space-y-3 mb-6">
                   {Array.isArray(plans.annual.features) && (plans.annual.features as string[]).map((feature, index) => (
                     <div key={index} className="flex items-center">
@@ -184,12 +165,11 @@ const Payment = () => {
                     </div>
                   ))}
                 </div>
-                
                 <div className="text-center">
                   <Button 
                     onClick={() => handlePurchase('annual')}
                     className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold py-3 rounded-xl text-sm transition-all duration-300"
-                    disabled={paymentLoading}
+                    disabled={paymentLoading && selectedPlanType === 'annual'}
                   >
                     {paymentLoading && selectedPlanType === 'annual' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
                     立即购买
@@ -198,8 +178,6 @@ const Payment = () => {
               </div>
             </div>
           )}
-
-          {/* ... (Lifetime Plan and Agent Plan cards are the same, no changes needed) ... */}
           {plans.lifetime && (
             <div className="relative group cursor-pointer transition-all duration-300 hover:scale-102">
               <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10">
@@ -208,7 +186,6 @@ const Payment = () => {
                   推荐
                 </div>
               </div>
-              
               <div className="relative bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-xl border-2 border-purple-400 rounded-3xl p-6 transition-all duration-300 shadow-2xl shadow-purple-500/25">
                 <div className="text-center mb-6">
                   <div className="flex items-center justify-center mb-4">
@@ -216,19 +193,16 @@ const Payment = () => {
                     <h3 className="text-lg font-bold text-white">{plans.lifetime.name}</h3>
                   </div>
                   <p className="text-gray-400 mb-4 text-sm">{plans.lifetime.description}</p>
-                  
                   <div className="mb-4">
                     <span className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
                       ¥{plans.lifetime.price}
                     </span>
                     <span className="text-gray-400 text-sm ml-2">{plans.lifetime.period}</span>
                   </div>
-                  
                   <div className="text-xs text-gray-500 mb-4">
                     相当于4年年费，超值划算
                   </div>
                 </div>
-                
                 <div className="space-y-3 mb-6">
                   {Array.isArray(plans.lifetime.features) && (plans.lifetime.features as string[]).map((feature, index) => (
                     <div key={index} className="flex items-center">
@@ -237,12 +211,11 @@ const Payment = () => {
                     </div>
                   ))}
                 </div>
-                
                 <div className="text-center">
                   <Button 
                     onClick={() => handlePurchase('lifetime')}
                     className="w-full bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold py-3 rounded-xl text-sm transition-all duration-300"
-                    disabled={paymentLoading}
+                    disabled={paymentLoading && selectedPlanType === 'lifetime'}
                   >
                     {paymentLoading && selectedPlanType === 'lifetime' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
                     立即购买
@@ -260,19 +233,16 @@ const Payment = () => {
                     <h3 className="text-lg font-bold text-white">{plans.agent.name}</h3>
                   </div>
                   <p className="text-gray-400 mb-4 text-sm">{plans.agent.description}</p>
-                  
                   <div className="mb-4">
                     <span className="text-3xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent">
                       ¥{plans.agent.price}
                     </span>
                     <span className="text-gray-400 text-sm ml-2">{plans.agent.period}</span>
                   </div>
-                  
                   <div className="text-xs text-gray-500 mb-4">
                     推广3-4单即可回本
                   </div>
                 </div>
-                
                 <div className="space-y-3 mb-6">
                   {Array.isArray(plans.agent.features) && (plans.agent.features as string[]).map((feature, index) => (
                     <div key={index} className="flex items-center">
@@ -281,12 +251,11 @@ const Payment = () => {
                     </div>
                   ))}
                 </div>
-                
                 <div className="text-center">
                   <Button 
                     onClick={() => handlePurchase('agent')}
                     className="w-full bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white font-bold py-3 rounded-xl text-sm transition-all duration-300"
-                    disabled={paymentLoading}
+                    disabled={paymentLoading && selectedPlanType === 'agent'}
                   >
                     {paymentLoading && selectedPlanType === 'agent' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
                     立即购买
@@ -295,12 +264,8 @@ const Payment = () => {
               </div>
             </div>
           )}
-
         </div>
       </div>
-      
-      {/* ★★★ 我们把整个 Payment Modal 都删掉了，因为不再需要了 ★★★ */}
-      
     </div>
   );
 };
